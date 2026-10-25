@@ -1,0 +1,37 @@
+sequenceDiagram
+    autonumber
+    participant S as Saga Orchestrator
+    participant B as Message Broker
+    participant I as Inventory Service
+    participant P as Payment Service
+    participant G as Gateway Financeiro
+    participant O as Order Service
+
+    S->>B: ReserveStock(sagaId, commandId)
+    B-->>I: ReserveStock
+    I->>I: Reserva temporária criada
+    I-->>B: StockReserved(reservationId)
+    B-->>S: StockReserved
+    S->>B: ProcessPayment(paymentKey estável)
+    B-->>P: ProcessPayment
+    P->>G: Tentar pagamento
+    G-->>P: Recusa definitiva
+    P-->>B: PaymentDeclined(reasonCode)
+    B-->>S: PaymentDeclined
+    S->>S: Persiste estado=COMPENSATING
+    par Cancelar pedido
+        S-->>B: CancelOrder(orderId, compensationId)
+        B-->>O: CancelOrder
+        O->>O: PENDING -> CANCELLED (idempotente)
+        O-->>B: OrderCancelled
+        B-->>S: OrderCancelled
+    and Liberar estoque
+        S-->>B: ReleaseStock(reservationId, compensationId)
+        B-->>I: ReleaseStock
+        I->>I: Libera reserva uma única vez
+        I-->>B: StockReleased
+        B-->>S: StockReleased
+    end
+    S->>S: Quando ambas confirmadas, Saga=COMPENSATED
+
+    Note over S,G: Timeout de rede não significa recusa. Se o resultado for desconhecido, reconciliar o gateway com a mesma chave antes de cancelar/liberar; se debitado, anular ou reembolsar primeiro.

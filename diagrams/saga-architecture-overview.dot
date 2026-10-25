@@ -1,0 +1,53 @@
+digraph SagaArchitecture {
+  graph [rankdir=LR, bgcolor="#F7F9FC", pad="0.35", nodesep="0.5", ranksep="0.8", fontname="DejaVu Sans", label="SAGA DE CHECKOUT — VISÃO GERAL", labelloc=t, fontsize=22, fontcolor="#172B4D"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=11, color="#B8C7DB", penwidth=1.4, margin="0.18,0.12", fontcolor="#172B4D"];
+  edge [fontname="DejaVu Sans", fontsize=9, color="#526985", fontcolor="#344563", penwidth=1.3, arrowsize=0.8];
+
+  client [label="Cliente / Web App", fillcolor="#FFFFFF", color="#9FB3C8"];
+  gateway [label="API Gateway / Checkout API\n202 Accepted + orderId", fillcolor="#E8F2FF", color="#5794D0"];
+  order [label="Order Service\nPENDING / CONFIRMED / CANCELLED", fillcolor="#EAF5FF", color="#5794D0"];
+  orderdb [shape=cylinder, label="Order DB\n+ Outbox", fillcolor="#FFFFFF", color="#5794D0"];
+  orch [label="Saga Orchestrator\nMáquina de estados + compensações", fillcolor="#FFF2CC", color="#D6A43A", penwidth=2.0];
+  sagadb [shape=cylinder, label="Saga State Store\nstep • retries • deadlines", fillcolor="#FFFFFF", color="#D6A43A"];
+  broker [shape=component, label="Message Broker\ncommands / events", fillcolor="#E7F7EF", color="#37A675", penwidth=1.8];
+  dlq [shape=folder, label="Retry Topics / DLQ\nalerta + replay auditado", fillcolor="#FFF0F0", color="#D66D6D"];
+  inventory [label="Inventory Service\nreserva temporária + TTL", fillcolor="#EAF5FF", color="#5794D0"];
+  invdb [shape=cylinder, label="Inventory DB\nreservations", fillcolor="#FFFFFF", color="#5794D0"];
+  payment [label="Payment Service\nidempotência + reconciliação", fillcolor="#EAF5FF", color="#5794D0"];
+  paydb [shape=cylinder, label="Payment DB\npayment status / key", fillcolor="#FFFFFF", color="#5794D0"];
+  external [label="Gateway Financeiro\nAPI externa", fillcolor="#FFFFFF", color="#9FB3C8"];
+  obs [shape=note, label="Observabilidade\nlogs • métricas • traces\nsagaId / orderId / correlationId", fillcolor="#F0ECFF", color="#9575CD"];
+
+  client -> gateway [label="POST /orders\nIdempotency-Key"];
+  gateway -> order [label="criar pedido"];
+  order -> orderdb [label="transação local\norder + outbox"];
+  orderdb -> broker [label="outbox relay\nOrderCreated"];
+  broker -> orch [label="evento / resultado"];
+  orch -> sagadb [label="persistir estado"];
+  orch -> broker [label="comandos\nReserveStock / ProcessPayment\nConfirmOrder / compensações", constraint=false];
+  broker -> inventory [label="ReserveStock / ReleaseStock"];
+  inventory -> invdb [label="reserva idempotente\ncom TTL"];
+  inventory -> broker [label="StockReserved /\nStockReleased / falha", constraint=false];
+  broker -> payment [label="ProcessPayment\nmesma chave idempotente"];
+  payment -> paydb [label="estado + referência"];
+  payment -> external [label="autorizar/processar\ne consultar status"];
+  payment -> broker [label="PaymentSucceeded /\nPaymentDeclined / Unknown", constraint=false];
+  broker -> order [label="ConfirmOrder / CancelOrder", constraint=false];
+  broker -> dlq [label="após retries limitados", color="#C05050", fontcolor="#A33A3A"];
+
+  { rank=same; client; }
+  { rank=same; gateway; }
+  { rank=same; order; orderdb; }
+  { rank=same; orch; sagadb; }
+  { rank=same; broker; dlq; }
+  { rank=same; inventory; invdb; }
+  { rank=same; payment; paydb; external; }
+
+  client -> obs [style=dashed, arrowhead=none, color="#9575CD", constraint=false];
+  orch -> obs [style=dashed, arrowhead=none, color="#9575CD", constraint=false];
+  broker -> obs [style=dashed, arrowhead=none, color="#9575CD", constraint=false];
+  inventory -> obs [style=dashed, arrowhead=none, color="#9575CD", constraint=false];
+  payment -> obs [style=dashed, arrowhead=none, color="#9575CD", constraint=false];
+  labelloc=b; label="Comunicação assíncrona via broker; cada serviço mantém seu próprio banco. Outbox/Inbox e idempotência protegem contra entrega duplicada.";
+  fontsize=10;
+}

@@ -1,0 +1,35 @@
+sequenceDiagram
+    autonumber
+    actor C as Cliente
+    participant O as Order Service
+    participant B as Message Broker
+    participant S as Saga Orchestrator
+    participant I as Inventory Service
+    participant P as Payment Service
+    participant G as Gateway Financeiro
+
+    C->>O: POST /orders + Idempotency-Key
+    O->>O: Grava order=PENDING + Outbox (transação local)
+    O-->>B: OrderCreated (outbox relay)
+    B-->>S: OrderCreated
+    S->>S: Persiste Saga=RESERVING_STOCK
+    S-->>B: ReserveStock(sagaId, commandId)
+    B-->>I: ReserveStock
+    I->>I: Reserva estoque atomicamente (idempotente + TTL)
+    I-->>B: StockReserved(reservationId)
+    B-->>S: StockReserved
+    S->>S: Persiste Saga=PROCESSING_PAYMENT
+    S-->>B: ProcessPayment(paymentKey estável)
+    B-->>P: ProcessPayment
+    P->>G: Processa pagamento (mesma chave idempotente)
+    G-->>P: Pagamento aprovado
+    P-->>B: PaymentSucceeded(paymentId)
+    B-->>S: PaymentSucceeded
+    S->>S: Persiste Saga=CONFIRMING_ORDER
+    S-->>B: ConfirmOrder(orderId)
+    B-->>O: ConfirmOrder
+    O->>O: Transição PENDING -> CONFIRMED
+    O-->>B: OrderConfirmed
+    B-->>S: OrderConfirmed
+    S->>S: Persiste Saga=COMPLETED
+    O-->>C: Status consultável: CONFIRMED (API pode retornar 202 inicialmente)
